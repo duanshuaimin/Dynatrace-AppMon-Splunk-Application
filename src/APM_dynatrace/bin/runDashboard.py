@@ -1,63 +1,63 @@
 import os
-import datetime
 import sys
-import subprocess
-from xml.etree import ElementTree
-import urllib
-
-from xml.dom import minidom
-
+import argparse
+from urllib.request import (HTTPPasswordMgrWithDefaultRealm, HTTPBasicAuthHandler, build_opener, install_opener)
+from urllib.error import URLError
 import lxml.etree as ET
-from urllib2 import URLError, HTTPPasswordMgrWithDefaultRealm, HTTPBasicAuthHandler, install_opener, build_opener
-
-# replace DTSERVER with Dynatrace Server IP and REST port
-# replace DASHBOARD with URL encoded Dashboard name
-
-DTSERVER="changeme:8020"
-DASHBOARD="changeme"
-TIMEFRAME="Last5Min"
-USERNAME=os.environ['DTUSER']
-PASSWORD=os.environ['DTPASS']
-xsl_filename = "report.xsl"
-feed_url = "http://"+ DTSERVER + "/rest/management/reports/create/"+ DASHBOARD + "?type=XML&format=XML+Export&filter=tf:" + TIMEFRAME
-
-abspath = os.path.abspath(__file__)
-dname = os.path.dirname(abspath)
-os.chdir(dname)
 
 
-# Set up a HTTPS request with username/password authentication
-try:
-  # create a password manager
-  password_mgr = HTTPPasswordMgrWithDefaultRealm()
-  # Add the username and password.
-  password_mgr.add_password(None, feed_url, USERNAME, PASSWORD)
-  opener = build_opener(HTTPBasicAuthHandler(password_mgr))
-  file = opener.open(feed_url)
+def main():
+    parser = argparse.ArgumentParser(description="Fetch and transform a Dynatrace dashboard report.")
+    parser.add_argument("--dtserver", default="changeme:8020", help="Dynatrace Server IP and REST port (e.g., 127.0.0.1:8020)")
+    parser.add_argument("--dashboard", default="changeme", help="URL encoded Dashboard name")
+    parser.add_argument("--timeframe", default="Last5Min", help="Timeframe for the report (e.g., Last5Min)")
+    args = parser.parse_args()
 
-except URLError, e:
-  print 'URLError: "%s"' % e
-  raise
+    try:
+        username = os.environ['DTUSER']
+        password = os.environ['DTPASS']
+    except KeyError:
+        print("Error: DTUSER and DTPASS environment variables must be set.", file=sys.stderr)
+        sys.exit(1)
 
-appdir = os.path.dirname(os.path.dirname(__file__))
-xsl_file = os.path.join(appdir, "bin", xsl_filename)
-out_dir = os.path.join(appdir,"log")
+    xsl_filename = "report.xsl"
+    feed_url = f"http://{args.dtserver}/rest/management/reports/create/{args.dashboard}?type=XML&format=XML+Export&filter=tf:{args.timeframe}"
 
-#print >> sys.stderr, "The XSL File", xsl_file
+    abspath = os.path.abspath(__file__)
+    dname = os.path.dirname(abspath)
+    os.chdir(dname)
 
-dom = ET.parse(file)
-#print >> sys.stderr, "The Feed file" , ET.tostring(dom, pretty_print=True)
+    try:
+        password_mgr = HTTPPasswordMgrWithDefaultRealm()
+        password_mgr.add_password(None, feed_url, username, password)
+        opener = build_opener(HTTPBasicAuthHandler(password_mgr))
+        install_opener(opener)
+        with opener.open(feed_url) as f:
+            dom = ET.parse(f)
 
-xslt = ET.parse(xsl_file)
+    except URLError as e:
+        print(f'URLError: "{e}"', file=sys.stderr)
+        raise
+    except ET.LxmlError as e:
+        print(f'XML Parsing Error: "{e}"', file=sys.stderr)
+        raise
 
-#print >> sys.stderr, "The XSLT file" , ET.tostring(xslt, pretty_print=True)
-transform = ET.XSLT(xslt)
-newdom = transform(dom)
+    appdir = os.path.dirname(os.path.dirname(__file__))
+    xsl_file = os.path.join(appdir, "bin", xsl_filename)
 
-print str(newdom)
+    try:
+        xslt = ET.parse(xsl_file)
+        transform = ET.XSLT(xslt)
+        newdom = transform(dom)
+        print(str(newdom))
+    except ET.LxmlError as e:
+        print(f'XSLT Parsing Error: "{e}"', file=sys.stderr)
+        raise
 
 
-#print >> sys.stderr, "The New file" , str(newdom)
+if __name__ == "__main__":
+    main()
+
 
 
 
